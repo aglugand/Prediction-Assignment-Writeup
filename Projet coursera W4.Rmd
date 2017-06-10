@@ -1,0 +1,117 @@
+---
+title: "Prediction Assignment Writeup"
+output: html_document
+---
+# The data
+```{r warning = FALSE, message=FALSE}
+library(readr)
+library(caret)
+library(glmnet)
+library(mice)
+library(VIM)
+
+pml_training <- read.table("~/coursera/machine learning/S4/projet/pml-training.csv", header=TRUE,sep = ",",stringsAsFactors = FALSE,na.strings=c("","NA"))
+pml_testing <- read.table("~/coursera/machine learning/S4/projet/pml-testing.csv", header=TRUE,sep = ",",stringsAsFactors = FALSE,na.strings=c("","NA"))
+
+#summary(pml_training)
+
+#Where are the missing data
+mice_plot <- aggr(pml_training, col=c('navyblue','yellow'),
+                  numbers=TRUE, sortVars=TRUE,
+                  labels=names(pml_training), cex.axis=.7,
+                  gap=3, ylab=c("Missing data","Pattern"))
+
+
+
+
+
+```
+
+```{r warning = FALSE, message=FALSE}
+
+
+# Deletion of NA
+train<-pml_training[ , colSums(is.na(pml_training)) == 0]
+test<-pml_testing[ , colSums(is.na(pml_testing)) == 0]
+
+#Adding data : numeric variable for classe 
+train$classe2<-9
+train$classe2[train$classe =="A"]<-1
+train$classe2[train$classe =="B"]<-2
+train$classe2[train$classe =="C"]<-3
+train$classe2[train$classe =="D"]<-4
+train$classe2[train$classe =="E"]<-5
+
+train[,61]<-factor(as.numeric(train[,61]))
+
+#Creation of dummy variable
+train_dummy <-train[,-c(60,61)]
+test_dummy <-test[,-c(60)]
+
+# we need to find columns from the data for which variance is near to zero (or zero) to reduce the dimension of the data by removing those columns for which varaince is zero
+
+zero<-nearZeroVar(train_dummy,freqCut = 95/5, uniqueCut = 10)
+pml_training_ok<-train_dummy[,-zero]
+
+zerot<-nearZeroVar(test_dummy,freqCut = 95/5, uniqueCut = 10)
+pml_test<-test_dummy[,-zerot]
+
+#final training data
+classe<-data.frame(train[,c(61)])
+names(classe)<-c("classe")
+train_glm<-cbind(pml_training_ok,classe)
+
+```
+
+#First model : gbm
+```{r warning = FALSE, message=FALSE}
+inTraining <- createDataPartition(train_glm$classe, p = .75, list = FALSE)
+training <- train_glm[ inTraining,]
+testing  <- train_glm[-inTraining,]
+
+#after a first launching without fixing parameters, the best parameters are :
+# n.trees = 150, interaction.depth = 2, shrinkage = 0.1 and n.minobsinnode = 10.
+
+gbmGrid <- expand.grid(.interaction.depth = 2, .n.trees =150, .shrinkage = .1,.n.minobsinnode = c(10))
+
+reg_gbm <-train (classe~.,data=training,method = "gbm",verbose = FALSE,tuneGrid = gbmGrid)
+
+pred<-predict(reg_gbm,testing)
+
+confusionMatrix(pred,testing$classe)
+
+
+```
+#Problem of overfitting with the first model,the second model use PCA prepocess to avoid overfiting by reducing variables
+ 
+
+
+```{r warning = FALSE, message=FALSE}
+#
+
+preprocesf<-preProcess(training[,c(-59)],method = "pca",thresh = 0.9,pcaComp=10)
+PC<-predict(preprocesf,training[,c(-59)])
+classe_pca<-data.frame(training[,c(59)])
+names(classe_pca)<-c("classe_pca")
+train_pca<-cbind(PC,classe_pca)
+
+testing_pca<-predict(preprocesf,testing)
+test_pca<-predict(preprocesf,pml_testing)
+
+gbmGrid_pca <- expand.grid(.interaction.depth = 3, .n.trees =150, .shrinkage = .1,.n.minobsinnode = c(10))
+gbm_pca <-train (classe_pca~.,data=train_pca,method = "gbm",verbose = FALSE,tuneGrid = gbmGrid_pca)
+
+
+model_pca<-predict(gbm_pca,testing_pca)
+confusionMatrix(model_pca,testing_pca$classe)
+
+```
+
+```{r warning = FALSE, message=FALSE}
+#Prediction on the test file
+predict(gbm_pca,test_pca)
+
+```
+
+
+
